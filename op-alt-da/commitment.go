@@ -2,9 +2,11 @@ package altda
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/ethereum-optimism/optimism/op-node/rollup/derive/params"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -25,6 +27,8 @@ func CommitmentTypeFromString(s string) (CommitmentType, error) {
 		return Keccak256CommitmentType, nil
 	case GenericCommitmentString:
 		return GenericCommitmentType, nil
+	case BatchedCommitmentString:
+		return BatchedCommitmentType, nil
 	default:
 		return 0, fmt.Errorf("invalid commitment type: %s", s)
 	}
@@ -36,8 +40,10 @@ func CommitmentTypeFromString(s string) (CommitmentType, error) {
 const (
 	Keccak256CommitmentType CommitmentType = 0
 	GenericCommitmentType   CommitmentType = 1
+	BatchedCommitmentType   CommitmentType = 2
 	KeccakCommitmentString  string         = "KeccakCommitment"
 	GenericCommitmentString string         = "GenericCommitment"
+	BatchedCommitmentString string         = "BatchedCommitment"
 )
 
 // CommitmentData is the binary representation of a commitment.
@@ -81,6 +87,8 @@ func DecodeCommitmentData(input []byte) (CommitmentData, error) {
 		return DecodeKeccak256(data)
 	case GenericCommitmentType:
 		return DecodeGenericCommitment(data)
+	case BatchedCommitmentType:
+		return DecodeBatchedCommitment(data)
 	default:
 		return nil, ErrInvalidCommitment
 	}
@@ -167,3 +175,107 @@ func (c GenericCommitment) Verify(input []byte) error {
 func (c GenericCommitment) String() string {
 	return hex.EncodeToString(c.Encode())
 }
+
+// BatchedCommitment represents a collection of Keccak256 commitments
+type BatchedCommitment []byte
+
+// NewBatchedCommitment creates a new batched commitment from the given commitments
+func NewBatchedCommitment(comms []CommitmentData) BatchedCommitment {
+	// Calculate total size needed: 2 bytes length + encoded bytes for each commitment
+	totalSize := 0
+	for _, comm := range comms {
+		encoded := comm.Encode()
+		totalSize += 2 + len(encoded) // 2 bytes for length
+	}
+
+	result := make([]byte, totalSize)
+	pos := 0
+
+	for _, comm := range comms {
+		encoded := comm.Encode()
+		// Write length (2 bytes, big endian)
+		result[pos] = byte(len(encoded) >> 8)
+		result[pos+1] = byte(len(encoded))
+		pos += 2
+
+		// Write encoded commitment (includes its type byte)
+		copy(result[pos:], encoded)
+		pos += len(encoded)
+	}
+
+	return BatchedCommitment(result)
+}
+
+// DecodeBatchedCommitment validates and casts the commitment into a BatchedCommitment
+func DecodeBatchedCommitment(commitment []byte) (BatchedCommitment, error) {
+	if len(commitment) == 0 {
+		return nil, ErrInvalidCommitment
+	}
+	// TODO: validate batched commitments
+	return commitment, nil
+}
+
+// CommitmentType returns the commitment type of BatchedCommitment
+func (c BatchedCommitment) CommitmentType() CommitmentType {
+	return BatchedCommitmentType
+}
+
+// Encode adds a commitment type prefix that describes the commitment
+func (c BatchedCommitment) Encode() []byte {
+	return append([]byte{byte(BatchedCommitmentType)}, c...)
+}
+
+// TxData adds an extra version byte to signal it's a commitment
+func (c BatchedCommitment) TxData() []byte {
+	return append([]byte{params.DerivationVersion1}, c.Encode()...)
+}
+
+// Verify checks if any of the batched commitments match the given input
+func (c BatchedCommitment) Verify(input []byte) error {
+	commitments, err := c.GetCommitments()
+	if err != nil {
+		return err
+	}
+
+	for _, comm := range commitments {
+		if err := comm.Verify(input); err == nil {
+			return nil // Found a matching commitment
+		}
+	}
+	return ErrCommitmentMismatch
+}
+
+// GetCommitments returns the individual commitments in the batch
+func (c BatchedCommitment) GetCommitments() ([]CommitmentData, error) {
+	var commitments []CommitmentData
+	reader := bytes.NewReader(c)
+
+	for reader.Len() > 0 {
+		// Read length (2 bytes)
+		var length uint16
+		if err := binary.Read(reader, binary.BigEndian, &length); err != nil {
+			return nil, ErrInvalidCommitment
+		}
+
+		// Read commitment data
+		data := make([]byte, length)
+		if _, err := io.ReadFull(reader, data); err != nil {
+			return nil, ErrInvalidCommitment
+		}
+
+		// Decode the commitment
+		comm, err := DecodeCommitmentData(data)
+		if err != nil {
+			return nil, err
+		}
+		commitments = append(commitments, comm)
+	}
+
+	return commitments, nil
+}
+
+func (c BatchedCommitment) String() string {
+	return hex.EncodeToString(c.Encode())
+}
+
+
