@@ -21,7 +21,6 @@ type AltDADataSource struct {
 	id      eth.L1BlockRef
 	// keep track of a pending commitments so we can keep trying to fetch the input.
 	comms []altda.CommitmentData
-	commIdx int
 }
 
 func NewAltDADataSource(log log.Logger, src DataIter, l1 L1Fetcher, fetcher AltDAInputFetcher, id eth.L1BlockRef) *AltDADataSource {
@@ -46,7 +45,7 @@ func (s *AltDADataSource) Next(ctx context.Context) (eth.Data, error) {
 		return nil, NewTemporaryError(fmt.Errorf("failed to advance altDA L1 origin: %w", err))
 	}
 
-	if s.commIdx >= len(s.comms) {
+	if len(s.comms) == 0 {
 		// the l1 source returns the input commitment for the batch.
 		data, err := s.src.Next(ctx)
 		if err != nil {
@@ -78,13 +77,12 @@ func (s *AltDADataSource) Next(ctx context.Context) (eth.Data, error) {
 				return nil, NotEnoughData
 			}
 		} else {
-			// The commitment does not implement BatchedCommitmentData
+			// The commitment is not a BatchedComitment
 			s.comms = []altda.CommitmentData{comm}
 		}
-		s.commIdx = 0
 	}
 
-	currComm := s.comms[s.commIdx]
+	currComm := s.comms[0]
 
 	// use the commitment to fetch the input from the AltDA provider.
 	data, err := s.fetcher.GetInput(ctx, s.l1, currComm, s.id)
@@ -96,8 +94,8 @@ func (s *AltDADataSource) Next(ctx context.Context) (eth.Data, error) {
 	} else if errors.Is(err, altda.ErrExpiredChallenge) {
 		// this commitment was challenged and the challenge expired.
 		s.log.Warn("challenge expired, skipping batch", "comm", currComm)
-		// skip only this commitment by incrementing index
-		s.commIdx++
+		// skip this commitment
+		s.comms = s.comms[1:]
 		return s.Next(ctx)
 	} else if errors.Is(err, altda.ErrMissingPastWindow) {
 		return nil, NewCriticalError(fmt.Errorf("data for comm %s not available: %w", currComm, err))
@@ -112,10 +110,10 @@ func (s *AltDADataSource) Next(ctx context.Context) (eth.Data, error) {
 	// TODO: maybe abstract this into a CommitmentData ValidateInput function?
 	if currComm.CommitmentType() == altda.Keccak256CommitmentType && len(data) > altda.MaxInputSize {
 		s.log.Warn("input data exceeds max size", "size", len(data), "max", altda.MaxInputSize)
-		s.commIdx++
+		s.comms = s.comms[1:]
 		return s.Next(ctx)
 	}
 	// reset the commitment so we can fetch the next one from the source at the next iteration.
-	s.commIdx++
+	s.comms = s.comms[1:]
 	return data, nil
 }
