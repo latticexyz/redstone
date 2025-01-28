@@ -24,6 +24,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-batcher/metrics"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/derive"
+	"github.com/ethereum-optimism/optimism/op-node/rollup/derive/params"
 	"github.com/ethereum-optimism/optimism/op-service/dial"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-service/txmgr"
@@ -791,11 +792,7 @@ func (l *BatchSubmitter) publishToAltDAAndL1(txdata txData, queue *txmgr.Queue[t
 	// when posting txdata to an external DA Provider, we use a goroutine to avoid blocking the main loop
 	// since it may take a while for the request to return.
 	goroutineSpawned := daGroup.TryGo(func() error {
-		// TODO: probably shouldn't be using the global shutdownCtx here, see https://go.dev/blog/context-and-structs
-		// but sendTransaction receives l.killCtx as an argument, which currently is only canceled after waiting for the main loop
-		// to exit, which would wait on this DA call to finish, which would take a long time.
-		// So we prefer to mimic the behavior of txmgr and cancel all pending DA/txmgr requests when the batcher is stopped.
-		comm, err := l.AltDA.SetInput(l.shutdownCtx, txdata.CallData())
+        comm, err := l.createAltDACommitment(txdata)
 		if err != nil {
 			// Don't log context cancelled events because they are expected,
 			// and can happen after tests complete which causes a panic.
@@ -809,6 +806,7 @@ func (l *BatchSubmitter) publishToAltDAAndL1(txdata txData, queue *txmgr.Queue[t
 			}
 			return nil
 		}
+
 		l.Log.Info("Set altda input", "commitment", comm, "tx", txdata.ID())
 		candidate := l.calldataTxCandidate(comm.TxData())
 		l.sendTx(txdata, false, candidate, queue, receiptsCh)
@@ -820,6 +818,42 @@ func (l *BatchSubmitter) publishToAltDAAndL1(txdata txData, queue *txmgr.Queue[t
 		// return it for later processing. We use nil error to skip error logging.
 		l.recordFailedDARequest(txdata.ID(), nil)
 	}
+}
+
+func (l *BatchSubmitter) createAltDACommitment(txdata txData) (altda.CommitmentData, error) {
+    inputs := l.prepareAltDAInputs(txdata)
+    comms := make([]altda.CommitmentData, 0, len(inputs))
+
+    for _, input := range inputs {
+		// TODO: probably shouldn't be using the global shutdownCtx here, see https://go.dev/blog/context-and-structs
+		// but sendTransaction receives l.killCtx as an argument, which currently is only canceled after waiting for the main loop
+		// to exit, which would wait on this DA call to finish, which would take a long time.
+		// So we prefer to mimic the behavior of txmgr and cancel all pending DA/txmgr requests when the batcher is stopped.
+        comm, err := l.AltDA.SetInput(l.shutdownCtx, input)
+        if err != nil {
+            return nil, err
+        }
+        comms = append(comms, comm)
+    }
+
+    // Return single or batched commitment based on how many frames we had
+    if len(comms) == 1 {
+        return comms[0], nil
+    }
+    return altda.NewBatchedCommitment(comms), nil
+}
+
+func (l *BatchSubmitter) prepareAltDAInputs(txdata txData) [][]byte {
+	// TODO: eventually we could instead check txdata.daType introduced in https://github.com/ethereum-optimism/optimism/pull/12400
+	if len(txdata.frames) <= 1 {
+		return [][]byte{txdata.CallData()}
+	}
+
+	result := make([][]byte, len(txdata.frames))
+	for i, f := range txdata.frames {
+		result[i] = append([]byte{params.DerivationVersion0}, f.data...)
+	}
+	return result
 }
 
 // sendTransaction creates & queues for sending a transaction to the batch inbox address with the given `txData`.
