@@ -180,30 +180,45 @@ func (c GenericCommitment) String() string {
 type BatchedCommitment []byte
 
 // NewBatchedCommitment creates a new batched commitment from the given commitments
-func NewBatchedCommitment(comms []CommitmentData) BatchedCommitment {
-	// Calculate total size needed: 2 bytes length + encoded bytes for each commitment
-	totalSize := 0
+func NewBatchedCommitment(comms []CommitmentData) (BatchedCommitment, error) {
+	if len(comms) == 0 {
+		return nil, ErrInvalidCommitment
+	}
+
+	// Verify all commitments are of the same type
+	subType := comms[0].CommitmentType()
+	for i, comm := range comms {
+		if comm.CommitmentType() != subType {
+			return nil, fmt.Errorf("commitment at index %d has different type than first commitment", i)
+		}
+	}
+
+	// Calculate total size needed: 1 byte for subcommitment type + (2 bytes length + raw data) for each commitment
+	totalSize := 1 // subcommitment type byte
 	for _, comm := range comms {
-		encoded := comm.Encode()
-		totalSize += 2 + len(encoded) // 2 bytes for length
+		rawData := comm.Encode()[1:] // Skip the type byte since we'll store it once at the start
+		totalSize += 2 + len(rawData) // 2 bytes for length + raw data
 	}
 
 	result := make([]byte, totalSize)
-	pos := 0
+
+	// Write the subcommitment type byte
+	result[0] = byte(subType)
+	pos := 1
 
 	for _, comm := range comms {
-		encoded := comm.Encode()
+		rawData := comm.Encode()[1:] // Skip the type byte
 		// Write length (2 bytes, big endian)
-		result[pos] = byte(len(encoded) >> 8)
-		result[pos+1] = byte(len(encoded))
+		result[pos] = byte(len(rawData) >> 8)
+		result[pos+1] = byte(len(rawData))
 		pos += 2
 
-		// Write encoded commitment (includes its type byte)
-		copy(result[pos:], encoded)
-		pos += len(encoded)
+		// Write raw commitment data (without type byte)
+		copy(result[pos:], rawData)
+		pos += len(rawData)
 	}
 
-	return BatchedCommitment(result)
+	return BatchedCommitment(result), nil
 }
 
 // DecodeBatchedCommitment validates and casts the commitment into a BatchedCommitment
@@ -211,8 +226,28 @@ func DecodeBatchedCommitment(commitment []byte) (BatchedCommitment, error) {
 	if len(commitment) == 0 {
 		return nil, ErrInvalidCommitment
 	}
-	// TODO: validate batched commitments
-	return commitment, nil
+
+	// Skip the subcommitment type byte when validating the structure
+	reader := bytes.NewReader(commitment[1:])
+	for reader.Len() > 0 {
+		// Read length (2 bytes)
+		var length uint16
+		if err := binary.Read(reader, binary.BigEndian, &length); err != nil {
+			return nil, ErrInvalidCommitment
+		}
+
+		// Ensure we have enough bytes for this commitment
+		if reader.Len() < int(length) {
+			return nil, ErrInvalidCommitment
+		}
+
+		// Skip the commitment data
+		if _, err := reader.Seek(int64(length), io.SeekCurrent); err != nil {
+			return nil, ErrInvalidCommitment
+		}
+	}
+
+	return BatchedCommitment(commitment), nil
 }
 
 // CommitmentType returns the commitment type of BatchedCommitment
@@ -247,8 +282,14 @@ func (c BatchedCommitment) Verify(input []byte) error {
 
 // GetCommitments returns the individual commitments in the batch
 func (c BatchedCommitment) GetCommitments() ([]CommitmentData, error) {
+	if len(c) < 1 {
+		return nil, ErrInvalidCommitment
+	}
+
+	// First byte is the subcommitment type
+	subType := CommitmentType(c[0])
+	reader := bytes.NewReader(c[1:])
 	var commitments []CommitmentData
-	reader := bytes.NewReader(c)
 
 	for reader.Len() > 0 {
 		// Read length (2 bytes)
@@ -263,8 +304,11 @@ func (c BatchedCommitment) GetCommitments() ([]CommitmentData, error) {
 			return nil, ErrInvalidCommitment
 		}
 
+		// Reconstruct full commitment with type byte
+		fullData := append([]byte{byte(subType)}, data...)
+
 		// Decode the commitment
-		comm, err := DecodeCommitmentData(data)
+		comm, err := DecodeCommitmentData(fullData)
 		if err != nil {
 			return nil, err
 		}

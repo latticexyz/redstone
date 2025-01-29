@@ -440,7 +440,8 @@ func (s *L2Batcher) ActL2SubmitBatchedCommitments(t Testing, numFrames int, txOp
 		comms[i] = comm
 	}
 
-	batchedComm := altda.NewBatchedCommitment(comms)
+	batchedComm, err := altda.NewBatchedCommitment(comms)
+	require.NoError(t, err, "error creating batched commitment")
 
 	nonce, err := s.l1.PendingNonceAt(t.Ctx(), s.BatcherAddr)
 	require.NoError(t, err, "need batcher nonce")

@@ -832,7 +832,7 @@ func (l *BatchSubmitter) createAltDACommitment(txdata txData) (altda.CommitmentD
     if len(comms) == 1 {
         return comms[0], nil
     }
-    return altda.NewBatchedCommitment(comms), nil
+    return altda.NewBatchedCommitment(comms)
 }
 
 func (l *BatchSubmitter) prepareAltDAInputs(txdata txData) [][]byte {

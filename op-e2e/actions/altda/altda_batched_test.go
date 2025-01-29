@@ -138,8 +138,7 @@ func (a *L2AltDA) ActSubmitBatchedCommitments(t helpers.Testing, n int) {
 
 	// Batch submit 2 commitments
 	a.batcher.ActL2SubmitBatchedCommitments(t, n, func(tx *types.DynamicFeeTx) {
-		// skip txdata version byte, and only store the second commitment (33 bytes)
-		// data = <DerivationVersion1> + <CommitmentType> + hash1 + hash2 + ...
+		// skip txdata version byte, and only store the second commitment
 		comm, err := altda.DecodeCommitmentData(tx.Data[1:])
 		require.NoError(t, err)
 
