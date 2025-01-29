@@ -60,7 +60,6 @@ func TestCommitmentData(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Log(tc.commData)
 			comm, err := DecodeCommitmentData(tc.commData)
 			require.ErrorIs(t, err, tc.expectedErr)
 			if err == nil {
