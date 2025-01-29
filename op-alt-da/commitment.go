@@ -223,7 +223,8 @@ func NewBatchedCommitment(comms []CommitmentData) (BatchedCommitment, error) {
 
 // DecodeBatchedCommitment validates and casts the commitment into a BatchedCommitment
 func DecodeBatchedCommitment(commitment []byte) (BatchedCommitment, error) {
-	if len(commitment) == 0 {
+	// Need at least: 1 byte for type + 2 bytes for first commitment length
+	if len(commitment) < 3 {
 		return nil, ErrInvalidCommitment
 	}
 
