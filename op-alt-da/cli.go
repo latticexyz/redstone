@@ -16,6 +16,7 @@ var (
 	PutTimeoutFlagName            = altDAFlags("put-timeout")
 	GetTimeoutFlagName            = altDAFlags("get-timeout")
 	MaxConcurrentRequestsFlagName = altDAFlags("max-concurrent-da-requests")
+	BatchedCommitmentsFlagName    = altDAFlags("batched-commitments")
 )
 
 // altDAFlags returns the flag names for altDA
@@ -77,6 +78,13 @@ func CLIFlags(envPrefix string, category string) []cli.Flag {
 			EnvVars:  altDAEnvs(envPrefix, "MAX_CONCURRENT_DA_REQUESTS"),
 			Category: category,
 		},
+		&cli.BoolFlag{
+			Name:     BatchedCommitmentsFlagName,
+			Usage:    "Use Batched Commitments",
+			Value:    false,
+			EnvVars:  altDAEnvs(envPrefix, "BATCHED_COMMITMENTS"),
+			Category: category,
+		},
 	}
 }
 
@@ -88,6 +96,7 @@ type CLIConfig struct {
 	PutTimeout            time.Duration
 	GetTimeout            time.Duration
 	MaxConcurrentRequests uint64
+	BatchedCommitments    bool
 }
 
 func (c CLIConfig) Check() error {
@@ -115,5 +124,6 @@ func ReadCLIConfig(c *cli.Context) CLIConfig {
 		PutTimeout:            c.Duration(PutTimeoutFlagName),
 		GetTimeout:            c.Duration(GetTimeoutFlagName),
 		MaxConcurrentRequests: c.Uint64(MaxConcurrentRequestsFlagName),
+		BatchedCommitments:    c.Bool(BatchedCommitmentsFlagName),
 	}
 }

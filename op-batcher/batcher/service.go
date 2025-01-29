@@ -39,6 +39,9 @@ type BatcherConfig struct {
 	// UseAltDA is true if the rollup config has a DA challenge address so the batcher
 	// will post inputs to the DA server and post commitments to blobs or calldata.
 	UseAltDA bool
+
+	UseBatchedCommitments bool
+
 	// maximum number of concurrent blob put requests to the DA server
 	MaxConcurrentDARequests uint64
 
@@ -385,6 +388,7 @@ func (bs *BatcherService) initAltDA(cfg *CLIConfig) error {
 	}
 	bs.AltDA = config.NewDAClient()
 	bs.UseAltDA = config.Enabled
+	bs.UseBatchedCommitments = config.BatchedCommitments
 	return nil
 }
 

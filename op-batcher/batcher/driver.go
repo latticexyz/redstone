@@ -836,8 +836,7 @@ func (l *BatchSubmitter) createAltDACommitment(txdata txData) (altda.CommitmentD
 }
 
 func (l *BatchSubmitter) prepareAltDAInputs(txdata txData) [][]byte {
-	// TODO: eventually we could instead check txdata.daType introduced in https://github.com/ethereum-optimism/optimism/pull/12400
-	if len(txdata.frames) <= 1 {
+	if !l.Config.UseBatchedCommitments {
 		return [][]byte{txdata.CallData()}
 	}
 
