@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.15;
+pragma solidity ^0.8.15;
 
 import { Safe } from "safe-contracts/Safe.sol";
 import { BaseGuard, GuardManager } from "safe-contracts/base/GuardManager.sol";
